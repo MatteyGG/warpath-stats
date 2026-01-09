@@ -1,0 +1,155 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum FetchStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+enum FetchResource {
+  ALLIANCE_DETAIL
+  PLAYER_DETAIL
+  SERVER_SCAN
+}
+
+model TrackedAlliance {
+  id        BigInt   @id @default(autoincrement()) @db.BigInt
+  wid       Int
+  gid       Int
+  name      String?
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([wid, gid], map: "tracked_alliance_wid_gid_key")
+  @@index([enabled], map: "tracked_alliance_enabled_idx")
+  @@map("tracked_alliance")
+}
+
+model FetchRun {
+  id         String        @id @default(uuid()) @db.Uuid
+  resource   FetchResource
+  wid        Int?
+  gid        Int?
+  pid        Int?
+  dayInt     Int?          @map("day_int")
+  page       Int?
+  perPage    Int?          @map("per_page")
+  status     FetchStatus   @default(PENDING)
+  attempt    Int           @default(0)
+  httpStatus Int?          @map("http_status")
+  error      String?
+  startedAt  DateTime?     @map("started_at")
+  finishedAt DateTime?     @map("finished_at")
+  createdAt  DateTime      @default(now()) @map("created_at")
+
+  rawPayload RawPayload?
+
+  @@index([resource, wid, gid, pid, dayInt], map: "fetch_runs_resource_idx")
+  @@index([status, createdAt], map: "fetch_runs_status_created_idx")
+  @@map("fetch_runs")
+}
+
+model RawPayload {
+  fetchRunId String   @id @db.Uuid @map("fetch_run_id")
+  payload    Json
+  receivedAt DateTime @default(now()) @map("received_at")
+
+  fetchRun   FetchRun @relation(fields: [fetchRunId], references: [id], onDelete: Cascade)
+
+  @@map("raw_payloads")
+}
+
+model AllianceSnapshot {
+  wid     Int
+  gid     Int
+  dayInt  Int     @map("day_int")
+
+  power   BigInt? @db.BigInt
+  kil     BigInt? @db.BigInt
+  di      Int?
+  owner   String?
+
+  cPower  BigInt? @db.BigInt @map("c_power")
+  cKil    BigInt? @db.BigInt @map("c_kil")
+  cDi     Int?              @map("c_di")
+
+  createdAt DateTime? @map("created_at")
+
+  @@id([wid, gid, dayInt], map: "alliance_snapshot_pkey")
+  @@index([wid, gid], map: "alliance_snapshot_wid_gid_idx")
+  @@index([wid, dayInt], map: "alliance_snapshot_wid_day_idx")
+  @@map("alliance_snapshot")
+}
+
+model DatasetAllianceHistory {
+  wid     Int
+  gid     Int
+  version Int      @default(1)
+
+  // ВАЖНО: в data лучше класть bigint-значения как string,
+  // чтобы API не падал на JSON.stringify(BigInt).
+  // (BigInt не сериализуется стандартным JSON). :contentReference[oaicite:3]{index=3}
+  data    Json
+  builtAt DateTime @default(now()) @map("built_at")
+
+  @@id([wid, gid, version], map: "dataset_alliance_history_pkey")
+  @@map("dataset_alliance_history")
+}
+
+model Player {
+  wid       Int
+  pid       Int
+  nick      String?
+  lv        Int?
+  firstSeen DateTime @default(now()) @map("first_seen")
+  lastSeen  DateTime @default(now()) @map("last_seen")
+
+  @@id([wid, pid], map: "player_pkey")
+  @@index([wid], map: "player_wid_idx")
+  @@map("players")
+}
+
+model PlayerSnapshot {
+  wid    Int
+  pid    Int
+  dayInt Int @map("day_int")
+
+  // ДУБЛИРУЕМ membership на день (как ты сказал)
+  gid    Int?
+  gnick  String?
+  nick   String?
+  lv     Int?
+
+  power    BigInt? @db.BigInt
+  maxpower BigInt? @db.BigInt
+  sumkill  BigInt? @db.BigInt
+  die      BigInt? @db.BigInt
+  score    BigInt? @db.BigInt
+  caiji    BigInt? @db.BigInt
+
+  createdAt DateTime? @map("created_at")
+
+  @@id([wid, pid, dayInt], map: "player_snapshot_pkey")
+  @@index([wid, dayInt], map: "player_snapshot_wid_day_idx")
+  @@index([wid, gid, dayInt], map: "player_snapshot_wid_gid_day_idx")
+  @@map("player_snapshots")
+}
+
+model PlayerAllianceMembership {
+  wid    Int
+  pid    Int
+  dayInt Int @map("day_int")
+
+  gid    Int
+  gnick  String?
+
+  @@id([wid, pid, dayInt], map: "player_alliance_membership_pkey")
+  @@index([wid, gid, dayInt], map: "player_alliance_membership_wid_gid_day_idx")
+  @@map("player_alliance_membership")
+}

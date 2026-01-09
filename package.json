@@ -1,0 +1,34 @@
+{
+  "name": "warpath-tracker",
+  "private": true,
+  "packageManager": "pnpm@10.26.2",
+  "type": "module",
+  "scripts": {
+    "dev:api": "tsx src/api/server.ts",
+    "dev:scheduler": "tsx src/scheduler/scheduler.ts",
+    "dev:worker:fetch": "tsx src/workers/fetch.worker.ts",
+    "dev:worker:process": "tsx src/workers/process.worker.ts",
+    "build": "tsc -p tsconfig.json",
+    "start:api": "node dist/api/server.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate:dev": "prisma migrate dev --config ./src/prisma.config.ts --schema ./prisma/schema.prisma",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:studio": "prisma studio",
+    "prisma:dbpull": "prisma db pull"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.2.0",
+    "@prisma/client": "^7.2.0",
+    "bullmq": "^5.66.3",
+    "express": "^5.2.1",
+    "log4js": "^6.9.1",
+    "redis": "^5.10.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.5",
+    "@types/node": "^20.11.30",
+    "prisma": "^7.2.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.6.3"
+  }
+}

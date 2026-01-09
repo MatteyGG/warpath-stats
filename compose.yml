@@ -1,0 +1,155 @@
+version: "3.9"
+
+services:
+
+  # -------------------------
+  # PostgreSQL
+  # -------------------------
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: tracker
+      POSTGRES_PASSWORD: tracker
+      POSTGRES_DB: tracker
+    networks:
+      - backend
+      - public
+      # For dev only
+    ports:
+      - "5432:5432" 
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tracker -d tracker"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # -------------------------
+  # Redis with password
+  # -------------------------
+  redis:
+    image: redis:7-alpine
+    networks:
+      - backend
+    expose:
+      - "${REDIS_PORT:-6379}"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-app_pass}
+    command: >
+      sh -c '
+        redis-server --requirepass "$$REDIS_PASSWORD" --save 60 1 --appendonly yes
+      '
+    healthcheck:
+      test: >
+        sh -c "redis-cli -a ${REDIS_PASSWORD:-app_pass} ping | grep -q PONG"
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # -------------------------
+  # API Service
+  # -------------------------
+  api:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+      - public
+    ports:
+      - "3001:3000"
+    environment:
+      PORT: "3000"
+      DATABASE_URL: postgresql://tracker:tracker@postgres:5432/tracker?schema=public
+
+      REDIS_HOST: redis
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-app_pass}
+      REDIS_BULL_DB: "1"
+      BULL_PREFIX: "warpath"
+    command: ["node", "dist/api/server.js"]
+
+  # -------------------------
+  # Scheduler
+  # -------------------------
+  scheduler:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+      - public
+    environment:
+      DATABASE_URL: postgresql://tracker:tracker@postgres:5432/tracker?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-app_pass}
+      REDIS_BULL_DB: "1"
+      BULL_PREFIX: "warpath"
+      DAILY_PATTERN: "0 15 3 * * *"
+    command: ["node", "dist/scheduler/scheduler.js"]
+
+  # -------------------------
+  # Fetch Worker
+  # -------------------------
+  fetch-worker:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+      - public
+    environment:
+      DATABASE_URL: postgresql://tracker:tracker@postgres:5432/tracker?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-app_pass}
+      REDIS_BULL_DB: "1"
+      BULL_PREFIX: "warpath"
+      FETCH_CONCURRENCY: "10"
+    command: ["node", "dist/workers/fetch.worker.js"]
+
+  # -------------------------
+  # Process Worker
+  # -------------------------
+  process-worker:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+    environment:
+      DATABASE_URL: postgresql://tracker:tracker@postgres:5432/tracker?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-app_pass}
+      REDIS_BULL_DB: "1"
+      BULL_PREFIX: "warpath"
+      PROCESS_CONCURRENCY: "5"
+    command: ["node", "dist/workers/process.worker.js"]
+
+# -------------------------
+# Networks & volumes
+# -------------------------
+networks:
+  backend:
+    internal: true
+  public:
+    driver: bridge
+
+volumes:
+  pg_data:
+  redis_data:
