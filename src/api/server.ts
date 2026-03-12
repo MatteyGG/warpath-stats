@@ -1,9 +1,11 @@
 import express from "express";
+import swaggerUi from "swagger-ui-express";
 import { getLogger, log4js } from "../lib/logger.js";
 
 import jobsRouter from "./routes/jobs.routes.js";
 import alliancesRouter from "./routes/alliances.routes.js";
 import playersRouter from "./routes/players.routes.js";
+import { openApiSpec } from "./openapi.js";
 
 const app = express();
 app.use(express.json());
@@ -21,6 +23,8 @@ app.use(
 );
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
+app.get("/openapi.json", (_req, res) => res.json(openApiSpec));
+app.use("/docs", swaggerUi.serve, swaggerUi.setup(openApiSpec));
 
 app.use("/jobs", jobsRouter);
 app.use("/alliances", alliancesRouter);
