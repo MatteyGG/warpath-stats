@@ -23,7 +23,7 @@ export async function enqueueFetch({
   perPage?: number;
 }) {
   // первое — убедиться, что запись в tracked_alliance есть
-  await prisma.trackedAlliance.upsert({
+  await prisma.tracked_alliance.upsert({
     where: { wid_gid: { wid, gid } },
     create: { wid, gid },
     update: {},

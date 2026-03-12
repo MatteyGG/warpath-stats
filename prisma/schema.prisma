@@ -18,7 +18,7 @@ enum FetchResource {
   SERVER_SCAN
 }
 
-model TrackedAlliance {
+model tracked_alliance {
   id        BigInt   @id @default(autoincrement()) @db.BigInt
   wid       Int
   gid       Int
@@ -28,10 +28,9 @@ model TrackedAlliance {
 
   @@unique([wid, gid], map: "tracked_alliance_wid_gid_key")
   @@index([enabled], map: "tracked_alliance_enabled_idx")
-  @@map("tracked_alliance")
 }
 
-model FetchRun {
+model fetch_runs {
   id         String        @id @default(uuid()) @db.Uuid
   resource   FetchResource
   wid        Int?
@@ -48,24 +47,81 @@ model FetchRun {
   finishedAt DateTime?     @map("finished_at")
   createdAt  DateTime      @default(now()) @map("created_at")
 
-  rawPayload RawPayload?
+  raw_guild_detail raw_guild_detail[]
+  raw_rank_pid     raw_rank_pid[]
 
   @@index([resource, wid, gid, pid, dayInt], map: "fetch_runs_resource_idx")
   @@index([status, createdAt], map: "fetch_runs_status_created_idx")
-  @@map("fetch_runs")
 }
 
-model RawPayload {
-  fetchRunId String   @id @db.Uuid @map("fetch_run_id")
-  payload    Json
-  receivedAt DateTime @default(now()) @map("received_at")
+model raw_guild_detail {
+  wid     Int
+  gid     Int
+  dayInt  Int      @map("day_int")
 
-  fetchRun   FetchRun @relation(fields: [fetchRunId], references: [id], onDelete: Cascade)
+  power   BigInt?  @db.BigInt
+  kil     BigInt?  @db.BigInt
+  di      Int?
+  owner   String?
+  sname   String?
+  fname   String?
 
-  @@map("raw_payloads")
+  cPower  BigInt?  @db.BigInt @map("c_power")
+  cKil    BigInt?  @db.BigInt @map("c_kil")
+  cDi     Int?               @map("c_di")
+
+  createdAt DateTime? @map("created_at")
+  fetchRunId String?  @db.Uuid @map("fetch_run_id")
+  fetchedAt  DateTime @default(now()) @map("fetched_at")
+
+  fetch_run fetch_runs? @relation(fields: [fetchRunId], references: [id], onDelete: SetNull)
+
+  @@id([wid, gid, dayInt], map: "raw_guild_detail_pkey")
+  @@index([wid, gid], map: "raw_guild_detail_wid_gid_idx")
+  @@index([fetchRunId], map: "raw_guild_detail_fetch_run_id_idx")
 }
 
-model AllianceSnapshot {
+model raw_rank_pid {
+  wid    Int
+  dayInt Int @map("day_int")
+  pid    Int
+
+  gid    Int?
+  gnick  String?
+  cid    Int?
+  ccid   Int?
+  lv     Int?
+  nick   String?
+
+  power    BigInt? @db.BigInt
+  maxpower BigInt? @db.BigInt
+  sumkill  BigInt? @db.BigInt
+  score    BigInt? @db.BigInt
+  die      BigInt? @db.BigInt
+  caiji    BigInt? @db.BigInt
+  gx       BigInt? @db.BigInt
+  bz       BigInt? @db.BigInt
+
+  cPower   BigInt? @db.BigInt @map("c_power")
+  cDie     BigInt? @db.BigInt @map("c_die")
+  cScore   BigInt? @db.BigInt @map("c_score")
+  cSumkill BigInt? @db.BigInt @map("c_sumkill")
+  cCaiji   BigInt? @db.BigInt @map("c_caiji")
+
+  kills    Int[]
+  createdAt DateTime? @map("created_at")
+  fetchRunId String?  @db.Uuid @map("fetch_run_id")
+  fetchedAt  DateTime @default(now()) @map("fetched_at")
+
+  fetch_run fetch_runs? @relation(fields: [fetchRunId], references: [id], onDelete: SetNull)
+
+  @@id([wid, dayInt, pid], map: "raw_rank_pid_pkey")
+  @@index([wid, dayInt], map: "raw_rank_pid_wid_day_idx")
+  @@index([wid, gid, dayInt], map: "raw_rank_pid_wid_gid_day_idx")
+  @@index([fetchRunId], map: "raw_rank_pid_fetch_run_id_idx")
+}
+
+model alliance_snapshot {
   wid     Int
   gid     Int
   dayInt  Int     @map("day_int")
@@ -84,10 +140,9 @@ model AllianceSnapshot {
   @@id([wid, gid, dayInt], map: "alliance_snapshot_pkey")
   @@index([wid, gid], map: "alliance_snapshot_wid_gid_idx")
   @@index([wid, dayInt], map: "alliance_snapshot_wid_day_idx")
-  @@map("alliance_snapshot")
 }
 
-model DatasetAllianceHistory {
+model ds_alliance_history {
   wid     Int
   gid     Int
   version Int      @default(1)
@@ -99,10 +154,9 @@ model DatasetAllianceHistory {
   builtAt DateTime @default(now()) @map("built_at")
 
   @@id([wid, gid, version], map: "dataset_alliance_history_pkey")
-  @@map("dataset_alliance_history")
 }
 
-model Player {
+model players {
   wid       Int
   pid       Int
   nick      String?
@@ -112,10 +166,9 @@ model Player {
 
   @@id([wid, pid], map: "player_pkey")
   @@index([wid], map: "player_wid_idx")
-  @@map("players")
 }
 
-model PlayerSnapshot {
+model ds_player_snapshots {
   wid    Int
   pid    Int
   dayInt Int @map("day_int")
@@ -132,16 +185,17 @@ model PlayerSnapshot {
   die      BigInt? @db.BigInt
   score    BigInt? @db.BigInt
   caiji    BigInt? @db.BigInt
+  allianceTechContribution BigInt? @db.BigInt @map("gx")
+  allianceHelp             BigInt? @db.BigInt @map("bz")
 
   createdAt DateTime? @map("created_at")
 
   @@id([wid, pid, dayInt], map: "player_snapshot_pkey")
   @@index([wid, dayInt], map: "player_snapshot_wid_day_idx")
   @@index([wid, gid, dayInt], map: "player_snapshot_wid_gid_day_idx")
-  @@map("player_snapshots")
 }
 
-model PlayerAllianceMembership {
+model player_alliance_membership {
   wid    Int
   pid    Int
   dayInt Int @map("day_int")
@@ -151,5 +205,4 @@ model PlayerAllianceMembership {
 
   @@id([wid, pid, dayInt], map: "player_alliance_membership_pkey")
   @@index([wid, gid, dayInt], map: "player_alliance_membership_wid_gid_day_idx")
-  @@map("player_alliance_membership")
 }

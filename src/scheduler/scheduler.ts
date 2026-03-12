@@ -3,6 +3,7 @@ import { schedulerQueue, fetchQueue } from "../bullmq/queues.js";
 import { bullConnection } from "../bullmq/connection.js";
 import { prisma } from "../lib/db.js";
 import { fetchTotalLatestDay } from "../integrations/warpath/warpath.client.js";
+import { isValidDayInt, nextDayInt } from "../lib/dayInt.js";
 
 const prefix = process.env.BULL_PREFIX ?? "warpath";
 const pattern = process.env.DAILY_PATTERN ?? "0 15 3 * * *";
@@ -36,7 +37,7 @@ async function startWorker() {
     "scheduler",
     async (job) => {
       if (job.name === "SCAN_TRACKED_ALLIANCES") {
-        const alliances = await prisma.trackedAlliance.findMany({
+        const alliances = await prisma.tracked_alliance.findMany({
           where: { enabled: true },
           select: { wid: true, gid: true },
         });
@@ -60,8 +61,11 @@ async function startWorker() {
 
       if (job.name === "SYNC_SERVER_DAYS") {
         const remoteLatest = await fetchTotalLatestDay();
+        if (!isValidDayInt(remoteLatest)) {
+          throw new Error(`Invalid remote latest dayInt: ${remoteLatest}`);
+        }
 
-        const wids = await prisma.trackedAlliance.findMany({
+        const wids = await prisma.tracked_alliance.findMany({
           where: { enabled: true },
           select: { wid: true },
           distinct: ["wid"],
@@ -70,7 +74,7 @@ async function startWorker() {
         const bulk: any[] = [];
 
         for (const { wid } of wids) {
-          const agg = await prisma.fetchRun.aggregate({
+          const agg = await prisma.fetch_runs.aggregate({
             where: { resource: "SERVER_SCAN", status: "SUCCESS", wid },
             _max: { dayInt: true },
           });
@@ -79,10 +83,11 @@ async function startWorker() {
 
           // MVP-решение: если ничего не собирали — тянем только remoteLatest
           const start = localLatest ? localLatest + 1 : remoteLatest;
+          if (!isValidDayInt(start)) continue;
 
           if (start > remoteLatest) continue;
 
-          for (let day = start; day <= remoteLatest; day++) {
+          for (let day = start; day <= remoteLatest; day = nextDayInt(day)) {
             bulk.push({
               name: "FETCH_SERVER_RANK_DAY",
               data: { kind: "SERVER_RANK_DAY", wid, dayInt: day, page: 1, perPage: 3000 },

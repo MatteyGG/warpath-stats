@@ -15,7 +15,7 @@ export async function getPlayerDataset(req: Request, res: Response) {
   if (!wid || !pid) return res.status(400).json({ error: "wid/pid must be integers" });
   if (!from || !to) return res.status(400).json({ error: "query from/to required (YYYYMMDD)" });
 
-  const rows = await prisma.playerSnapshot.findMany({
+  const rows = await prisma.ds_player_snapshots.findMany({
     where: { wid, pid, dayInt: { gte: from, lte: to } },
     orderBy: { dayInt: "asc" },
     select: {
@@ -30,6 +30,8 @@ export async function getPlayerDataset(req: Request, res: Response) {
       die: true,
       score: true,
       caiji: true,
+      allianceTechContribution: true,
+      allianceHelp: true,
       createdAt: true,
     },
   });
@@ -47,6 +49,8 @@ export async function getPlayerDataset(req: Request, res: Response) {
     die: r.die?.toString() ?? null,
     score: r.score?.toString() ?? null,
     caiji: r.caiji?.toString() ?? null,
+    allianceTechContribution: r.allianceTechContribution?.toString() ?? null,
+    allianceHelp: r.allianceHelp?.toString() ?? null,
     createdAt: r.createdAt,
   }));
 
