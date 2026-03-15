@@ -1,0 +1,72 @@
+name: Deploy to VPS (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Docker tag to deploy (latest/dev/main-<sha>/dev-<sha>)"
+        required: true
+        default: "dev"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          script: |
+            set -e
+            if [ ! -d ~/warpath-stats/.git ]; then
+              git clone https://github.com/MatteyGG/warpath-stats.git ~/warpath-stats
+            fi
+            cd ~/warpath-stats
+            git fetch origin
+            git checkout dev
+            git pull --ff-only origin dev
+
+            cat > .env <<EOF
+            REDIS_PASSWORD=${{ secrets.WARPATH_REDIS_PASSWORD }}
+            BULL_PREFIX=warpath
+            DAILY_PATTERN=0 15 3 * * *
+            CITY_LIST_TTL_MS=43200000
+            EOF
+
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ secrets.GHCR_USER }}" --password-stdin
+            export WARPATH_STATS_TAG=${{ github.event.inputs.image_tag }}
+
+            docker compose -f compose.vps.yml -p warpathstats pull api scheduler fetch-worker process-worker
+            docker compose -f compose.vps.yml -p warpathstats up -d postgres redis
+
+            docker run --rm \
+              --network warpathstats_backend \
+              -e DATABASE_URL=postgresql://tracker:tracker@postgres:5432/tracker?schema=public \
+              ghcr.io/matteygg/warpath-stats:${{ github.event.inputs.image_tag }} \
+              node node_modules/prisma/build/index.js db push --schema /app/prisma/schema.prisma --url postgresql://tracker:tracker@postgres:5432/tracker?schema=public
+
+            docker compose -f compose.vps.yml -p warpathstats up -d api scheduler fetch-worker process-worker
+
+            docker run --rm --network stasiswp_app-network curlimages/curl:8.7.1 -fsS http://warpath-api:3000/health
+
+      - name: Notify Telegram (success)
+        if: success()
+        run: |
+          TEXT="✅ warpath-stats: успешный деплой\nТег: ${{ github.event.inputs.image_tag }}"
+          curl -sS -X POST "https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "{\"chat_id\":\"${{ secrets.TG_CHAT_ID }}\",\"text\":\"$TEXT\"}" >/dev/null
+
+      - name: Notify Telegram (failure)
+        if: failure()
+        run: |
+          TEXT="❌ warpath-stats: деплой неуспешен\nТег: ${{ github.event.inputs.image_tag }}"
+          curl -sS -X POST "https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "{\"chat_id\":\"${{ secrets.TG_CHAT_ID }}\",\"text\":\"$TEXT\"}" >/dev/null

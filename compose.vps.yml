@@ -1,0 +1,123 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: tracker
+      POSTGRES_PASSWORD: tracker
+      POSTGRES_DB: tracker
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tracker -d tracker"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - backend
+
+  redis:
+    image: redis:7-alpine
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-app_pass}
+    command: ["sh", "-c", "redis-server --requirepass \"$$REDIS_PASSWORD\" --save 60 1 --appendonly yes"]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD:-app_pass} ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend
+
+  api:
+    container_name: warpath-api
+    image: ghcr.io/matteygg/warpath-stats:${WARPATH_STATS_TAG:-dev}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      PORT: "3000"
+      DATABASE_URL: postgresql://tracker:tracker@postgres:5432/tracker?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-app_pass}
+      REDIS_BULL_DB: ${REDIS_BULL_DB:-1}
+      BULL_PREFIX: ${BULL_PREFIX:-warpath}
+      CITY_LIST_TTL_MS: ${CITY_LIST_TTL_MS:-43200000}
+    command: ["node", "dist/api/server.js"]
+    expose:
+      - "3000"
+    networks:
+      - backend
+      - stasis
+
+  scheduler:
+    image: ghcr.io/matteygg/warpath-stats:${WARPATH_STATS_TAG:-dev}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://tracker:tracker@postgres:5432/tracker?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-app_pass}
+      REDIS_BULL_DB: ${REDIS_BULL_DB:-1}
+      BULL_PREFIX: ${BULL_PREFIX:-warpath}
+      DAILY_PATTERN: ${DAILY_PATTERN:-0 15 3 * * *}
+    command: ["node", "dist/scheduler/scheduler.js"]
+    networks:
+      - backend
+
+  fetch-worker:
+    image: ghcr.io/matteygg/warpath-stats:${WARPATH_STATS_TAG:-dev}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://tracker:tracker@postgres:5432/tracker?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-app_pass}
+      REDIS_BULL_DB: ${REDIS_BULL_DB:-1}
+      BULL_PREFIX: ${BULL_PREFIX:-warpath}
+      FETCH_CONCURRENCY: ${FETCH_CONCURRENCY:-8}
+    command: ["node", "dist/workers/fetch.worker.js"]
+    networks:
+      - backend
+
+  process-worker:
+    image: ghcr.io/matteygg/warpath-stats:${WARPATH_STATS_TAG:-dev}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://tracker:tracker@postgres:5432/tracker?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-app_pass}
+      REDIS_BULL_DB: ${REDIS_BULL_DB:-1}
+      BULL_PREFIX: ${BULL_PREFIX:-warpath}
+      PROCESS_CONCURRENCY: ${PROCESS_CONCURRENCY:-4}
+    command: ["node", "dist/workers/process.worker.js"]
+    networks:
+      - backend
+
+networks:
+  backend:
+    internal: true
+  stasis:
+    external: true
+    name: stasiswp_app-network
+
+volumes:
+  pg_data:
+  redis_data:
