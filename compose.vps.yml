@@ -33,6 +33,9 @@ services:
   api:
     container_name: warpath-api
     image: ghcr.io/matteygg/warpath-stats:${WARPATH_STATS_TAG:-dev}
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     depends_on:
       postgres:
         condition: service_healthy
@@ -56,6 +59,9 @@ services:
 
   scheduler:
     image: ghcr.io/matteygg/warpath-stats:${WARPATH_STATS_TAG:-dev}
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     depends_on:
       postgres:
         condition: service_healthy
@@ -75,6 +81,9 @@ services:
 
   fetch-worker:
     image: ghcr.io/matteygg/warpath-stats:${WARPATH_STATS_TAG:-dev}
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     depends_on:
       postgres:
         condition: service_healthy
