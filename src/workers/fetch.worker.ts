@@ -10,7 +10,7 @@ const concurrency = Number(process.env.FETCH_CONCURRENCY ?? 10);
 const log = getLogger("fetch");
 type FetchJobData =
   | { kind: "GUILD_DETAIL"; wid: number; gid: number; perPage?: number; page?: number }
-  | { kind: "SERVER_RANK_DAY"; wid: number; dayInt: number; perPage?: number; page?: number };
+  | { kind: "SERVER_RANK_DAY"; wid: number; dayInt: number; ccid?: number; perPage?: number; page?: number };
 
 function toBigIntOrNull(v: any): bigint | null {
   if (v === null || v === undefined) return null;
@@ -95,7 +95,8 @@ async function handleFetch(job: Job<FetchJobData>) {
         job.data.wid,
         job.data.dayInt,
         job.data.perPage ?? 3000,
-        job.data.page ?? 1
+        job.data.page ?? 1,
+        job.data.ccid ?? 0
       );
 
       const rows: any[] = Array.isArray(payload?.Data) ? payload.Data : [];

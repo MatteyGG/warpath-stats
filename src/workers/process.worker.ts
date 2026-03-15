@@ -10,6 +10,22 @@ const log = getLogger("process");
 
 type ProcessJobData = { fetchRunId: string };
 
+type CityDayAgg = {
+  playerCount: number;
+  allianceIds: Set<number>;
+  totalPower: bigint;
+  totalSumkill: bigint;
+  totalDie: bigint;
+  totalScore: bigint;
+  totalCaiji: bigint;
+  totalGx: bigint;
+  totalBz: bigint;
+};
+
+function addBigInt(base: bigint, v: bigint | null | undefined): bigint {
+  return base + (v ?? 0n);
+}
+
 // ---------- existing: alliance dataset builder ----------
 export async function buildAllianceHistoryDataset(wid: number, gid: number) {
   const rows = await prisma.alliance_snapshot.findMany({
@@ -104,6 +120,7 @@ async function processServerRankDay(fetchRunId: string) {
 
   log.info({ fetchRunId, wid, dayInt, rows: rows.length }, "[process] server_rank_day start");
   let count = 0;
+  const cityAgg = new Map<number, CityDayAgg>();
 
   for (const r of rows) {
     const pid = r.pid;
@@ -111,6 +128,8 @@ async function processServerRankDay(fetchRunId: string) {
 
     const gid = r.gid ?? null;
     const gnick = r.gnick ?? null;
+    const cid = typeof r.cid === "number" ? r.cid : null;
+    const ccid = typeof r.ccid === "number" ? r.ccid : null;
 
     // 1) player (справочник)
     await prisma.players.upsert({
@@ -140,6 +159,8 @@ async function processServerRankDay(fetchRunId: string) {
     dayInt,
     gid,
     gnick,
+    cid,
+    ccid,
     nick: r.nick ?? null,
     lv: typeof r.lv === "number" ? r.lv : null,
     power: r.power ?? null,
@@ -154,7 +175,9 @@ async function processServerRankDay(fetchRunId: string) {
   },
   update: {
     gid,
-    gnick,
+    gnick: r.gnick ?? undefined,
+    cid,
+    ccid,
     nick: r.nick ?? undefined,
     lv: typeof r.lv === "number" ? r.lv : undefined,
     power: r.power ?? null,
@@ -174,14 +197,74 @@ async function processServerRankDay(fetchRunId: string) {
       await prisma.player_alliance_membership.upsert({
         where: { wid_pid_dayInt: { wid, pid, dayInt } },
         create: { wid, pid, dayInt, gid, gnick },
-        update: { gid, gnick },
+        update: { gid, gnick: r.gnick ?? undefined },
       });
+    }
+
+    if (ccid !== null) {
+      let agg = cityAgg.get(ccid);
+      if (!agg) {
+        agg = {
+          playerCount: 0,
+          allianceIds: new Set<number>(),
+          totalPower: 0n,
+          totalSumkill: 0n,
+          totalDie: 0n,
+          totalScore: 0n,
+          totalCaiji: 0n,
+          totalGx: 0n,
+          totalBz: 0n,
+        };
+        cityAgg.set(ccid, agg);
+      }
+
+      agg.playerCount += 1;
+      if (gid !== null) agg.allianceIds.add(gid);
+      agg.totalPower = addBigInt(agg.totalPower, r.power);
+      agg.totalSumkill = addBigInt(agg.totalSumkill, r.sumkill);
+      agg.totalDie = addBigInt(agg.totalDie, r.die);
+      agg.totalScore = addBigInt(agg.totalScore, r.score);
+      agg.totalCaiji = addBigInt(agg.totalCaiji, r.caiji);
+      agg.totalGx = addBigInt(agg.totalGx, r.gx);
+      agg.totalBz = addBigInt(agg.totalBz, r.bz);
     }
 
     count++;
   }
 
-  return { wid, dayInt, count };
+  for (const [ccid, agg] of cityAgg.entries()) {
+    await prisma.ds_city_daily_stats.upsert({
+      where: { wid_dayInt_ccid: { wid, dayInt, ccid } },
+      create: {
+        wid,
+        dayInt,
+        ccid,
+        playerCount: agg.playerCount,
+        allianceCount: agg.allianceIds.size,
+        totalPower: agg.totalPower,
+        totalSumkill: agg.totalSumkill,
+        totalDie: agg.totalDie,
+        totalScore: agg.totalScore,
+        totalCaiji: agg.totalCaiji,
+        totalGx: agg.totalGx,
+        totalBz: agg.totalBz,
+      },
+      update: {
+        playerCount: agg.playerCount,
+        allianceCount: agg.allianceIds.size,
+        totalPower: agg.totalPower,
+        totalSumkill: agg.totalSumkill,
+        totalDie: agg.totalDie,
+        totalScore: agg.totalScore,
+        totalCaiji: agg.totalCaiji,
+        totalGx: agg.totalGx,
+        totalBz: agg.totalBz,
+        builtAt: new Date(),
+      },
+    });
+  }
+
+  return { wid, dayInt, count, cityCount: cityAgg.size };
 }
 
 // ---------- router ----------

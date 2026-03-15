@@ -120,11 +120,17 @@ type RankPidResp = z.infer<typeof rankPidRespSchema>;
 
 const DEBUG_HTTP = process.env.WARPATH_HTTP_DEBUG === "1";
 
-export async function fetchRankPidDay(wid: number, dayInt: number, perPage = 3000, page = 1) {
+export async function fetchRankPidDay(
+  wid: number,
+  dayInt: number,
+  perPage = 3000,
+  page = 1,
+  ccid = 0
+) {
   const url = new URL("https://yx.dmzgame.com/intl_warpath/rank_pid");
   url.searchParams.set("day", String(dayInt));
   url.searchParams.set("wid", String(wid));
-  url.searchParams.set("ccid", "0");
+  url.searchParams.set("ccid", String(ccid));
   url.searchParams.set("rank", "power");
   url.searchParams.set("is_benfu", "1");
   url.searchParams.set("is_quanfu", "0");

@@ -4,6 +4,7 @@ import { bullConnection } from "../bullmq/connection.js";
 import { prisma } from "../lib/db.js";
 import { fetchTotalLatestDay } from "../integrations/warpath/warpath.client.js";
 import { isValidDayInt, nextDayInt } from "../lib/dayInt.js";
+import { getCityIdsForWorld } from "../api/services/city-reference.service.js";
 
 const prefix = process.env.BULL_PREFIX ?? "warpath";
 const pattern = process.env.DAILY_PATTERN ?? "0 15 3 * * *";
@@ -74,6 +75,9 @@ async function startWorker() {
         const bulk: any[] = [];
 
         for (const { wid } of wids) {
+          const ccidsForWid = await getCityIdsForWorld(wid);
+          const finalCcids = ccidsForWid.length > 0 ? ccidsForWid : [0];
+
           const agg = await prisma.fetch_runs.aggregate({
             where: { resource: "SERVER_SCAN", status: "SUCCESS", wid },
             _max: { dayInt: true },
@@ -88,17 +92,19 @@ async function startWorker() {
           if (start > remoteLatest) continue;
 
           for (let day = start; day <= remoteLatest; day = nextDayInt(day)) {
-            bulk.push({
-              name: "FETCH_SERVER_RANK_DAY",
-              data: { kind: "SERVER_RANK_DAY", wid, dayInt: day, page: 1, perPage: 3000 },
-              opts: {
-                jobId: `server-${wid}-day-${day}`, // дедуп по jobId :contentReference[oaicite:5]{index=5}
-                attempts: 5,
-                backoff: { type: "exponential", delay: 1000 },
-                removeOnComplete: true,
-                removeOnFail: 1000,
-              },
-            });
+            for (const ccid of finalCcids) {
+              bulk.push({
+                name: "FETCH_SERVER_RANK_DAY",
+                data: { kind: "SERVER_RANK_DAY", wid, dayInt: day, ccid, page: 1, perPage: 3000 },
+                opts: {
+                  jobId: `server-${wid}-day-${day}-ccid-${ccid}`,
+                  attempts: 5,
+                  backoff: { type: "exponential", delay: 1000 },
+                  removeOnComplete: true,
+                  removeOnFail: 1000,
+                },
+              });
+            }
           }
         }
 

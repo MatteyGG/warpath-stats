@@ -176,6 +176,8 @@ model ds_player_snapshots {
   // ДУБЛИРУЕМ membership на день (как ты сказал)
   gid    Int?
   gnick  String?
+  cid    Int?
+  ccid   Int?
   nick   String?
   lv     Int?
 
@@ -193,6 +195,29 @@ model ds_player_snapshots {
   @@id([wid, pid, dayInt], map: "player_snapshot_pkey")
   @@index([wid, dayInt], map: "player_snapshot_wid_day_idx")
   @@index([wid, gid, dayInt], map: "player_snapshot_wid_gid_day_idx")
+  @@index([wid, ccid, dayInt], map: "player_snapshot_wid_ccid_day_idx")
+}
+
+model ds_city_daily_stats {
+  wid    Int
+  dayInt Int @map("day_int")
+  ccid   Int
+
+  playerCount   Int    @default(0) @map("player_count")
+  allianceCount Int    @default(0) @map("alliance_count")
+  totalPower    BigInt @default(0) @db.BigInt @map("total_power")
+  totalSumkill  BigInt @default(0) @db.BigInt @map("total_sumkill")
+  totalDie      BigInt @default(0) @db.BigInt @map("total_die")
+  totalScore    BigInt @default(0) @db.BigInt @map("total_score")
+  totalCaiji    BigInt @default(0) @db.BigInt @map("total_caiji")
+  totalGx       BigInt @default(0) @db.BigInt @map("total_gx")
+  totalBz       BigInt @default(0) @db.BigInt @map("total_bz")
+
+  builtAt DateTime @default(now()) @map("built_at")
+
+  @@id([wid, dayInt, ccid], map: "ds_city_daily_stats_pkey")
+  @@index([wid, dayInt], map: "ds_city_daily_stats_wid_day_idx")
+  @@index([wid, ccid, dayInt], map: "ds_city_daily_stats_wid_ccid_day_idx")
 }
 
 model player_alliance_membership {
