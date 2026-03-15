@@ -128,7 +128,7 @@ services:
 
 networks:
   backend:
-    internal: true
+    driver: bridge
   stasis:
     external: true
     name: stasiswp_app-network
