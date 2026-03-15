@@ -65,11 +65,23 @@ async function startWorker() {
           throw new Error(`Invalid remote latest dayInt: ${remoteLatest}`);
         }
 
-        const wids = await prisma.tracked_alliance.findMany({
-          where: { enabled: true },
-          select: { wid: true },
-          distinct: ["wid"],
-        });
+        const [allianceWids, playerWids] = await Promise.all([
+          prisma.tracked_alliance.findMany({
+            where: { enabled: true },
+            select: { wid: true },
+            distinct: ["wid"],
+          }),
+          prisma.tracked_player.findMany({
+            where: { enabled: true },
+            select: { wid: true },
+            distinct: ["wid"],
+          }),
+        ]);
+
+        const widSet = new Set<number>();
+        for (const w of allianceWids) widSet.add(w.wid);
+        for (const w of playerWids) widSet.add(w.wid);
+        const wids = Array.from(widSet).map((wid) => ({ wid }));
 
         const bulk: any[] = [];
 

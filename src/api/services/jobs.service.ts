@@ -2,6 +2,7 @@ import { Queue } from "bullmq";
 import { bullConnection } from "../../bullmq/connection.js";
 import { prisma } from "../../lib/db.js";
 import { schedulerQueue } from "../../bullmq/queues.js";
+import { fetchTotalLatestDay } from "../../integrations/warpath/warpath.client.js";
 
 
 const prefix = process.env.BULL_PREFIX ?? "warpath";
@@ -184,6 +185,11 @@ export async function enqueueServerRankBackfill({
     note:
       "Jobs are deduped by jobId per day; existing jobs with same jobId will be ignored by BullMQ.",
   };
+}
+
+export async function enqueueServerRankLatest({ wid, page = 1, perPage = 3000 }: { wid: number; page?: number; perPage?: number }) {
+  const latestDayInt = await fetchTotalLatestDay();
+  return enqueueServerRankDay({ wid, dayInt: latestDayInt, page, perPage });
 }
 
 // Ручной триггер scheduler-логики: просто ставим job в очередь "scheduler"

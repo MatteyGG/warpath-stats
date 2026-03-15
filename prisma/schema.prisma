@@ -30,6 +30,18 @@ model tracked_alliance {
   @@index([enabled], map: "tracked_alliance_enabled_idx")
 }
 
+model tracked_player {
+  id        BigInt   @id @default(autoincrement()) @db.BigInt
+  wid       Int
+  pid       Int
+  note      String?
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([wid, pid], map: "tracked_player_wid_pid_key")
+  @@index([enabled], map: "tracked_player_enabled_idx")
+}
+
 model fetch_runs {
   id         String        @id @default(uuid()) @db.Uuid
   resource   FetchResource
