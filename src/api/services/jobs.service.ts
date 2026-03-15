@@ -2,7 +2,6 @@ import { Queue } from "bullmq";
 import { bullConnection } from "../../bullmq/connection.js";
 import { prisma } from "../../lib/db.js";
 import { schedulerQueue } from "../../bullmq/queues.js";
-import { getCityIdsForWorld } from "./city-reference.service.js";
 
 
 const prefix = process.env.BULL_PREFIX ?? "warpath";
@@ -54,8 +53,6 @@ type EnqueueServerRankDayArgs = {
   dayInt: number; // YYYYMMDD
   page?: number;
   perPage?: number;
-  includeCities?: boolean;
-  cityIds?: number[];
 };
 
 type EnqueueBackfillArgs = {
@@ -64,8 +61,6 @@ type EnqueueBackfillArgs = {
   toDayInt: number;   // YYYYMMDD
   page?: number;
   perPage?: number;
-  includeCities?: boolean;
-  cityIds?: number[];
 };
 
 function assertDayInt(dayInt: number) {
@@ -124,17 +119,10 @@ export async function enqueueServerRankDay({
   dayInt,
   page = 1,
   perPage = 3000,
-  includeCities = true,
-  cityIds,
 }: EnqueueServerRankDayArgs) {
   assertDayInt(dayInt);
 
-  const ccids =
-    includeCities
-      ? ((cityIds && cityIds.length > 0) ? cityIds : await getCityIdsForWorld(wid))
-      : [0];
-  const uniqueCcids = Array.from(new Set(ccids.filter((x) => Number.isInteger(x) && x >= 0)));
-  const finalCcids = uniqueCcids.length > 0 ? uniqueCcids : [0];
+  const finalCcids = [0];
 
   const items = finalCcids.map((ccid) => ({
     name: "FETCH_SERVER_RANK_DAY",
@@ -152,7 +140,7 @@ export async function enqueueServerRankDay({
 
   return {
     ok: true,
-    requested: { wid, dayInt, page, perPage, includeCities, ccids: finalCcids.length },
+    requested: { wid, dayInt, page, perPage, ccids: finalCcids.length },
     jobIds: jobs.map((j) => j.id),
     note:
       "If the same jobId already exists and hasn't been removed yet, BullMQ will ignore the new add (dedup).",
@@ -165,19 +153,12 @@ export async function enqueueServerRankBackfill({
   toDayInt,
   page = 1,
   perPage = 3000,
-  includeCities = true,
-  cityIds,
 }: EnqueueBackfillArgs) {
   // валидируем как даты
   dayIntToUtcDate(fromDayInt);
   dayIntToUtcDate(toDayInt);
 
-  const ccids =
-    includeCities
-      ? ((cityIds && cityIds.length > 0) ? cityIds : await getCityIdsForWorld(wid))
-      : [0];
-  const uniqueCcids = Array.from(new Set(ccids.filter((x) => Number.isInteger(x) && x >= 0)));
-  const finalCcids = uniqueCcids.length > 0 ? uniqueCcids : [0];
+  const finalCcids = [0];
 
   const items = Array.from(iterDayInts(fromDayInt, toDayInt)).flatMap((dayInt) =>
     finalCcids.map((ccid) => ({
@@ -198,7 +179,7 @@ export async function enqueueServerRankBackfill({
 
   return {
     ok: true,
-    requested: { wid, fromDayInt, toDayInt, page, perPage, includeCities, ccids: finalCcids.length },
+    requested: { wid, fromDayInt, toDayInt, page, perPage, ccids: finalCcids.length },
     requestedJobs: items.length,
     note:
       "Jobs are deduped by jobId per day; existing jobs with same jobId will be ignored by BullMQ.",
