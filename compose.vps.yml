@@ -36,6 +36,8 @@ services:
     dns:
       - 1.1.1.1
       - 8.8.8.8
+    extra_hosts:
+      - "yx.dmzgame.com:43.242.73.180"
     depends_on:
       postgres:
         condition: service_healthy
@@ -62,6 +64,8 @@ services:
     dns:
       - 1.1.1.1
       - 8.8.8.8
+    extra_hosts:
+      - "yx.dmzgame.com:43.242.73.180"
     depends_on:
       postgres:
         condition: service_healthy
@@ -84,6 +88,8 @@ services:
     dns:
       - 1.1.1.1
       - 8.8.8.8
+    extra_hosts:
+      - "yx.dmzgame.com:43.242.73.180"
     depends_on:
       postgres:
         condition: service_healthy
