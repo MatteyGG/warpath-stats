@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { prisma } from "../../lib/db.js";
-import { resolveCityName } from "../services/city-reference.service.js";
+import { getCityMap, resolveCityName } from "../services/city-reference.service.js";
 import { detectWorldMode } from "../services/worlds.service.js";
 
 function toInt(v: unknown): number | null {
@@ -209,5 +209,127 @@ export async function cityTrend(req: Request, res: Response) {
       totalGx: r.totalGx.toString(),
       totalBz: r.totalBz.toString(),
     })),
+  });
+}
+
+export async function worldAllianceCityHeatmap(req: Request, res: Response) {
+  const wid = toInt(req.params.wid);
+  if (!wid) return res.status(400).json({ error: "wid must be integer" });
+
+  const gidsRaw = typeof req.query.gids === "string" ? req.query.gids : "";
+  const gids = gidsRaw
+    .split(",")
+    .map((x) => Number(x.trim()))
+    .filter((x) => Number.isInteger(x) && x > 0);
+  if (gids.length === 0) return res.status(400).json({ error: "gids query is required (comma-separated integers)" });
+
+  const latest = await prisma.ds_player_snapshots.aggregate({
+    where: { wid },
+    _max: { dayInt: true },
+  });
+  const latestDay = latest._max.dayInt ?? null;
+  if (!latestDay) return res.json({ wid, empty: true, message: "No player snapshots yet" });
+
+  const dayToRaw = toInt(req.query.toDay) ?? latestDay;
+  const dayFromRaw = toInt(req.query.fromDay) ?? dayToRaw;
+  const dayFrom = Math.min(dayFromRaw, dayToRaw);
+  const dayTo = Math.max(dayFromRaw, dayToRaw);
+
+  const [rowsFrom, rowsTo, modeInfo, cityMap] = await Promise.all([
+    prisma.ds_player_snapshots.findMany({
+      where: { wid, gid: { in: gids }, dayInt: dayFrom, ccid: { not: null } },
+      select: { pid: true, gid: true, ccid: true },
+    }),
+    prisma.ds_player_snapshots.findMany({
+      where: { wid, gid: { in: gids }, dayInt: dayTo, ccid: { not: null } },
+      select: { pid: true, gid: true, ccid: true },
+    }),
+    detectWorldMode(wid),
+    getCityMap(),
+  ]);
+
+  const fromCityCount = new Map<number, number>();
+  const toCityCount = new Map<number, number>();
+  for (const r of rowsFrom) {
+    if (typeof r.ccid === "number") fromCityCount.set(r.ccid, (fromCityCount.get(r.ccid) ?? 0) + 1);
+  }
+  for (const r of rowsTo) {
+    if (typeof r.ccid === "number") toCityCount.set(r.ccid, (toCityCount.get(r.ccid) ?? 0) + 1);
+  }
+
+  const fromByPid = new Map<number, number>();
+  const toByPid = new Map<number, number>();
+  for (const r of rowsFrom) if (typeof r.ccid === "number") fromByPid.set(r.pid, r.ccid);
+  for (const r of rowsTo) if (typeof r.ccid === "number") toByPid.set(r.pid, r.ccid);
+
+  const transitionCount = new Map<string, number>();
+  if (dayFrom !== dayTo) {
+    for (const [pid, fromCcid] of fromByPid.entries()) {
+      const toCcid = toByPid.get(pid);
+      if (typeof toCcid !== "number" || toCcid === fromCcid) continue;
+      const key = `${fromCcid}->${toCcid}`;
+      transitionCount.set(key, (transitionCount.get(key) ?? 0) + 1);
+    }
+  }
+
+  const allCityIds = new Set<number>([
+    ...Array.from(fromCityCount.keys()),
+    ...Array.from(toCityCount.keys()),
+  ]);
+
+  const cities = Array.from(allCityIds.values())
+    .map((ccid) => {
+      const row = cityMap.get(ccid);
+      const name = modeInfo.mode === "16" ? row?.city_16_name ?? row?.city_80_name ?? null : row?.city_80_name ?? row?.city_16_name ?? null;
+      const fromCount = fromCityCount.get(ccid) ?? 0;
+      const toCount = toCityCount.get(ccid) ?? 0;
+      return {
+        ccid,
+        name,
+        fromCount,
+        toCount,
+        delta: toCount - fromCount,
+      };
+    })
+    .sort((a, b) => Math.max(b.fromCount, b.toCount) - Math.max(a.fromCount, a.toCount));
+
+  const transitions = Array.from(transitionCount.entries())
+    .map(([k, count]) => {
+      const [fromStr, toStr] = k.split("->");
+      const fromCcid = Number(fromStr);
+      const toCcid = Number(toStr);
+      const fromRow = cityMap.get(fromCcid);
+      const toRow = cityMap.get(toCcid);
+      const fromName = modeInfo.mode === "16" ? fromRow?.city_16_name ?? fromRow?.city_80_name ?? null : fromRow?.city_80_name ?? fromRow?.city_16_name ?? null;
+      const toName = modeInfo.mode === "16" ? toRow?.city_16_name ?? toRow?.city_80_name ?? null : toRow?.city_80_name ?? toRow?.city_16_name ?? null;
+      return { fromCcid, toCcid, fromName, toName, count };
+    })
+    .sort((a, b) => b.count - a.count);
+
+  const gnickRows = await prisma.ds_player_snapshots.groupBy({
+    by: ["gid", "gnick"],
+    where: { wid, dayInt: dayTo, gid: { in: gids }, gnick: { not: null } },
+    _count: { _all: true },
+  });
+  const alliances = gids.map((gid) => {
+    const top = gnickRows
+      .filter((x) => x.gid === gid && typeof x.gnick === "string")
+      .sort((a, b) => (b._count._all ?? 0) - (a._count._all ?? 0))[0];
+    return { gid, gnick: top?.gnick ?? null };
+  });
+
+  return res.json({
+    wid,
+    mode: modeInfo.mode,
+    fromDayInt: dayFrom,
+    toDayInt: dayTo,
+    alliances,
+    totals: {
+      fromPlayers: rowsFrom.length,
+      toPlayers: rowsTo.length,
+      movedPlayers: transitions.reduce((acc, t) => acc + t.count, 0),
+    },
+    cities,
+    transitions,
   });
 }
