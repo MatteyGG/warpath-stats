@@ -9,6 +9,7 @@ router.get("/players", v1.players);
 router.get("/players/:pid", v1.playerProfile);
 router.get("/players/:pid/series", v1.playerSeries);
 router.get("/players/:pid/membership", v1.playerMembership);
+router.get("/players/:pid/actions", v1.playerActions);
 
 router.get("/alliances", v1.alliances);
 router.get("/alliances/:gid", v1.allianceProfile);

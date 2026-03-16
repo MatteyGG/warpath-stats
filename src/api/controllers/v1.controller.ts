@@ -474,12 +474,21 @@ async function allianceShortTag(wid: number, gid: number, dayInt: number): Promi
 }
 
 async function buildAllianceCard(wid: number, gid: number, latestDay: number) {
+  const prevDay = shiftDay(latestDay, -7);
   const gnick = await allianceShortTag(wid, gid, latestDay);
-  const [cur, prev7, membersCur, membersPrev7] = await Promise.all([
+  const [cur, prev7, membersCur, membersPrev7, dieCurAgg, diePrevAgg] = await Promise.all([
     prisma.alliance_snapshot.findUnique({ where: { wid_gid_dayInt: { wid, gid, dayInt: latestDay } } }),
-    prisma.alliance_snapshot.findUnique({ where: { wid_gid_dayInt: { wid, gid, dayInt: shiftDay(latestDay, -7) } } }),
+    prisma.alliance_snapshot.findUnique({ where: { wid_gid_dayInt: { wid, gid, dayInt: prevDay } } }),
     prisma.player_alliance_membership.count({ where: { wid, gid, dayInt: latestDay } }),
-    prisma.player_alliance_membership.count({ where: { wid, gid, dayInt: shiftDay(latestDay, -7) } }),
+    prisma.player_alliance_membership.count({ where: { wid, gid, dayInt: prevDay } }),
+    prisma.ds_player_snapshots.aggregate({
+      where: { wid, gid, dayInt: latestDay },
+      _sum: { die: true },
+    }),
+    prisma.ds_player_snapshots.aggregate({
+      where: { wid, gid, dayInt: prevDay },
+      _sum: { die: true },
+    }),
   ]);
   if (!cur) {
     const [pCur, pPrev] = await Promise.all([
@@ -539,8 +548,8 @@ async function buildAllianceCard(wid: number, gid: number, latestDay: number) {
   const pPrev = toBigInt(prev7?.power);
   const kCur = toBigInt(cur.kil);
   const kPrev = toBigInt(prev7?.kil);
-  const dCur = BigInt(cur.di ?? 0);
-  const dPrev = BigInt(prev7?.di ?? 0);
+  const dCur = toBigInt(dieCurAgg._sum.die);
+  const dPrev = toBigInt(diePrevAgg._sum.die);
   const mCur = BigInt(membersCur);
   const mPrev = BigInt(membersPrev7);
 
@@ -553,7 +562,7 @@ async function buildAllianceCard(wid: number, gid: number, latestDay: number) {
     current: {
       power: pCur.toString(),
       kil: kCur.toString(),
-      di: String(cur.di ?? 0),
+      di: dCur.toString(),
       memberCount: membersCur,
     },
     delta: {
@@ -658,6 +667,13 @@ export async function allianceSeries(req: Request, res: Response) {
     orderBy: { dayInt: "asc" },
   });
 
+  const deathsByDay = await prisma.ds_player_snapshots.groupBy({
+    by: ["dayInt"],
+    where: { wid, gid, dayInt: { gte: fromDay, lte: toDay } },
+    _sum: { die: true },
+  });
+  const dMap = new Map<number, bigint>(deathsByDay.map((x) => [x.dayInt, toBigInt(x._sum.die)]));
+
   const memberCounts = await prisma.player_alliance_membership.groupBy({
     by: ["dayInt"],
     where: { wid, gid, dayInt: { gte: fromDay, lte: toDay } },
@@ -670,10 +686,51 @@ export async function allianceSeries(req: Request, res: Response) {
     const dateLabel = String(r.dayInt);
     if (metrics.includes("power")) series.power.push({ dayInt: r.dayInt, dateLabel, value: bStr(r.power), isComplete: true });
     if (metrics.includes("kil")) series.kil.push({ dayInt: r.dayInt, dateLabel, value: bStr(r.kil), isComplete: true });
-    if (metrics.includes("di")) series.di.push({ dayInt: r.dayInt, dateLabel, value: String(r.di ?? 0), isComplete: true });
+    if (metrics.includes("di")) series.di.push({ dayInt: r.dayInt, dateLabel, value: String(dMap.get(r.dayInt) ?? BigInt(0)), isComplete: true });
     if (metrics.includes("memberCount")) series.memberCount.push({ dayInt: r.dayInt, dateLabel, value: mMap.get(r.dayInt) ?? 0, isComplete: true });
   }
   res.json({ data: { gid: String(gid), series: serialize(series) } });
+}
+
+export async function playerActions(req: Request, res: Response) {
+  const wid = toInt(req.query.wid);
+  const pid = toInt(req.params.pid);
+  if (!wid || !pid) return res.status(400).json({ error: "wid query and pid param are required integers" });
+
+  const latestDay = await latestDayForWid(wid);
+  if (!latestDay) return res.json({ data: { pid: String(pid), actions: [] } });
+
+  const fromDay = toInt(req.query.fromDay) ?? shiftDay(latestDay, -30);
+  const toDay = toInt(req.query.toDay) ?? latestDay;
+
+  const rows = await prisma.ds_player_snapshots.findMany({
+    where: { wid, pid, dayInt: { gte: shiftDay(fromDay, -1), lte: toDay } },
+    orderBy: { dayInt: "asc" },
+    select: { dayInt: true, nick: true },
+  });
+
+  const actions: Array<Record<string, unknown>> = [];
+  let prevNick: string | null = null;
+  for (const r of rows) {
+    const curNick = (r.nick ?? "").trim();
+    if (!curNick) continue;
+    if (prevNick === null) {
+      prevNick = curNick;
+      continue;
+    }
+    if (r.dayInt >= fromDay && r.dayInt <= toDay && prevNick !== curNick) {
+      actions.push({
+        type: "nick_changed",
+        title: "Смена ника",
+        dayInt: r.dayInt,
+        from: prevNick,
+        to: curNick,
+      });
+    }
+    prevNick = curNick;
+  }
+
+  res.json({ data: { pid: String(pid), fromDay, toDay, actions: actions.sort((a, b) => Number((b.dayInt ?? 0)) - Number((a.dayInt ?? 0))) } });
 }
 
 export async function allianceRoster(req: Request, res: Response) {

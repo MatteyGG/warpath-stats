@@ -14,6 +14,24 @@ function toInt(v: unknown): number | null {
   return Number.isInteger(n) ? n : null;
 }
 
+function dayIntToDate(dayInt: number): Date {
+  const s = String(dayInt);
+  return new Date(Date.UTC(Number(s.slice(0, 4)), Number(s.slice(4, 6)) - 1, Number(s.slice(6, 8))));
+}
+
+function dateToDayInt(dt: Date): number {
+  const y = dt.getUTCFullYear();
+  const m = String(dt.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(dt.getUTCDate()).padStart(2, "0");
+  return Number(`${y}${m}${d}`);
+}
+
+function shiftDay(dayInt: number, delta: number): number {
+  const dt = dayIntToDate(dayInt);
+  dt.setUTCDate(dt.getUTCDate() + delta);
+  return dateToDayInt(dt);
+}
+
 export async function listTrackedPlayers(_req: Request, res: Response) {
   const list = await trackedPlayersService.getAll();
   res.json(serialize(list));
@@ -42,6 +60,9 @@ export async function deleteTrackedPlayer(req: Request, res: Response) {
 export async function createTrackedPlayer(req: Request, res: Response) {
   const wid = toInt(req.body?.wid);
   const pid = toInt(req.body?.pid);
+  const fromDayInt = toInt(req.body?.fromDayInt);
+  const toDayInt = toInt(req.body?.toDayInt);
+  const backfillDays = toInt(req.body?.backfillDays) ?? 90;
   const note = typeof req.body?.note === "string" ? req.body.note.trim() : null;
 
   if (wid === null || pid === null) {
@@ -50,11 +71,32 @@ export async function createTrackedPlayer(req: Request, res: Response) {
 
   try {
     const player = await trackedPlayersService.create(wid, pid, note);
-    const syncJob = await jobsService.enqueueServerRankLatest({ wid });
+    const latest = await jobsService.enqueueServerRankLatest({ wid });
+    const latestDay =
+      typeof (latest as any)?.requested?.dayInt === "number"
+        ? Number((latest as any).requested.dayInt)
+        : null;
+
+    const finalTo = toDayInt ?? latestDay;
+    const finalFrom =
+      fromDayInt ??
+      (finalTo !== null ? shiftDay(finalTo, -Math.max(1, Math.min(365, backfillDays))) : null);
+
+    const backfill =
+      finalFrom !== null && finalTo !== null && finalFrom <= finalTo
+        ? await jobsService.enqueueServerRankBackfill({
+            wid,
+            fromDayInt: finalFrom,
+            toDayInt: finalTo,
+            page: 1,
+            perPage: 3000,
+          })
+        : null;
 
     return res.status(201).json({
       trackedPlayer: serialize(player),
-      firstSync: syncJob,
+      firstSync: latest,
+      backfill,
       warning:
         "Warpath rank_pid returns ranked players only. If pid is outside returned ranks, data may still be missing.",
     });
