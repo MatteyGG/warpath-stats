@@ -235,16 +235,23 @@ export async function worldAllianceCityHeatmap(req: Request, res: Response) {
   const dayFrom = Math.min(dayFromRaw, dayToRaw);
   const dayTo = Math.max(dayFromRaw, dayToRaw);
 
-  const [rowsFrom, rowsTo, modeInfo] = await Promise.all([
+  const [rowsFrom, rowsTo, modeInfo, availableDayRows] = await Promise.all([
     prisma.ds_player_snapshots.findMany({
       where: { wid, gid: { in: gids }, dayInt: dayFrom, ccid: { not: null } },
-      select: { pid: true, gid: true, ccid: true },
+      select: { pid: true, gid: true, ccid: true, nick: true },
     }),
     prisma.ds_player_snapshots.findMany({
       where: { wid, gid: { in: gids }, dayInt: dayTo, ccid: { not: null } },
-      select: { pid: true, gid: true, ccid: true },
+      select: { pid: true, gid: true, ccid: true, nick: true },
     }),
     detectWorldMode(wid),
+    prisma.ds_player_snapshots.findMany({
+      where: { wid, gid: { in: gids } },
+      select: { dayInt: true },
+      distinct: ["dayInt"],
+      orderBy: { dayInt: "asc" },
+      take: 180,
+    }),
   ]);
 
   const fromCityCount = new Map<number, number>();
@@ -256,18 +263,23 @@ export async function worldAllianceCityHeatmap(req: Request, res: Response) {
     if (typeof r.ccid === "number") toCityCount.set(r.ccid, (toCityCount.get(r.ccid) ?? 0) + 1);
   }
 
-  const fromByPid = new Map<number, number>();
-  const toByPid = new Map<number, number>();
-  for (const r of rowsFrom) if (typeof r.ccid === "number") fromByPid.set(r.pid, r.ccid);
-  for (const r of rowsTo) if (typeof r.ccid === "number") toByPid.set(r.pid, r.ccid);
+  const fromByPid = new Map<number, { ccid: number; nick: string | null }>();
+  const toByPid = new Map<number, { ccid: number; nick: string | null }>();
+  for (const r of rowsFrom) if (typeof r.ccid === "number") fromByPid.set(r.pid, { ccid: r.ccid, nick: r.nick ?? null });
+  for (const r of rowsTo) if (typeof r.ccid === "number") toByPid.set(r.pid, { ccid: r.ccid, nick: r.nick ?? null });
 
-  const transitionCount = new Map<string, number>();
+  const transitionCount = new Map<string, { count: number; players: Array<{ pid: number; nick: string | null }> }>();
   if (dayFrom !== dayTo) {
-    for (const [pid, fromCcid] of fromByPid.entries()) {
-      const toCcid = toByPid.get(pid);
-      if (typeof toCcid !== "number" || toCcid === fromCcid) continue;
-      const key = `${fromCcid}->${toCcid}`;
-      transitionCount.set(key, (transitionCount.get(key) ?? 0) + 1);
+    for (const [pid, fromInfo] of fromByPid.entries()) {
+      const toInfo = toByPid.get(pid);
+      if (!toInfo || toInfo.ccid === fromInfo.ccid) continue;
+      const key = `${fromInfo.ccid}->${toInfo.ccid}`;
+      const cur = transitionCount.get(key) ?? { count: 0, players: [] };
+      cur.count += 1;
+      if (cur.players.length < 40) {
+        cur.players.push({ pid, nick: toInfo.nick ?? fromInfo.nick ?? null });
+      }
+      transitionCount.set(key, cur);
     }
   }
 
@@ -296,7 +308,7 @@ export async function worldAllianceCityHeatmap(req: Request, res: Response) {
 
   const transitions = (
     await Promise.all(
-      Array.from(transitionCount.entries()).map(async ([k, count]) => {
+      Array.from(transitionCount.entries()).map(async ([k, value]) => {
       const [fromStr, toStr] = k.split("->");
       const fromCcid = Number(fromStr);
       const toCcid = Number(toStr);
@@ -306,7 +318,7 @@ export async function worldAllianceCityHeatmap(req: Request, res: Response) {
       ]);
       const fromName = fromNames.displayName;
       const toName = toNames.displayName;
-      return { fromCcid, toCcid, fromName, toName, count };
+      return { fromCcid, toCcid, fromName, toName, count: value.count, players: value.players };
       })
     )
   )
@@ -335,6 +347,7 @@ export async function worldAllianceCityHeatmap(req: Request, res: Response) {
       toPlayers: rowsTo.length,
       movedPlayers: transitions.reduce((acc, t) => acc + t.count, 0),
     },
+    availableDays: availableDayRows.map((r) => r.dayInt),
     cities,
     transitions,
   });
