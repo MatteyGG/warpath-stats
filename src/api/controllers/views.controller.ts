@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { prisma } from "../../lib/db.js";
-import { getCityMap, resolveCityName } from "../services/city-reference.service.js";
+import { resolveCityName } from "../services/city-reference.service.js";
 import { detectWorldMode } from "../services/worlds.service.js";
 
 function toInt(v: unknown): number | null {
@@ -235,7 +235,7 @@ export async function worldAllianceCityHeatmap(req: Request, res: Response) {
   const dayFrom = Math.min(dayFromRaw, dayToRaw);
   const dayTo = Math.max(dayFromRaw, dayToRaw);
 
-  const [rowsFrom, rowsTo, modeInfo, cityMap] = await Promise.all([
+  const [rowsFrom, rowsTo, modeInfo] = await Promise.all([
     prisma.ds_player_snapshots.findMany({
       where: { wid, gid: { in: gids }, dayInt: dayFrom, ccid: { not: null } },
       select: { pid: true, gid: true, ccid: true },
@@ -245,7 +245,6 @@ export async function worldAllianceCityHeatmap(req: Request, res: Response) {
       select: { pid: true, gid: true, ccid: true },
     }),
     detectWorldMode(wid),
-    getCityMap(),
   ]);
 
   const fromCityCount = new Map<number, number>();
@@ -277,33 +276,40 @@ export async function worldAllianceCityHeatmap(req: Request, res: Response) {
     ...Array.from(toCityCount.keys()),
   ]);
 
-  const cities = Array.from(allCityIds.values())
-    .map((ccid) => {
-      const row = cityMap.get(ccid);
-      const name = modeInfo.mode === "16" ? row?.city_16_name ?? row?.city_80_name ?? null : row?.city_80_name ?? row?.city_16_name ?? null;
-      const fromCount = fromCityCount.get(ccid) ?? 0;
-      const toCount = toCityCount.get(ccid) ?? 0;
-      return {
-        ccid,
-        name,
-        fromCount,
-        toCount,
-        delta: toCount - fromCount,
-      };
-    })
+  const cities = (
+    await Promise.all(
+      Array.from(allCityIds.values()).map(async (ccid) => {
+        const names = await resolveCityName(ccid, modeInfo.mode);
+        const fromCount = fromCityCount.get(ccid) ?? 0;
+        const toCount = toCityCount.get(ccid) ?? 0;
+        return {
+          ccid,
+          name: names.displayName,
+          fromCount,
+          toCount,
+          delta: toCount - fromCount,
+        };
+      })
+    )
+  )
     .sort((a, b) => Math.max(b.fromCount, b.toCount) - Math.max(a.fromCount, a.toCount));
 
-  const transitions = Array.from(transitionCount.entries())
-    .map(([k, count]) => {
+  const transitions = (
+    await Promise.all(
+      Array.from(transitionCount.entries()).map(async ([k, count]) => {
       const [fromStr, toStr] = k.split("->");
       const fromCcid = Number(fromStr);
       const toCcid = Number(toStr);
-      const fromRow = cityMap.get(fromCcid);
-      const toRow = cityMap.get(toCcid);
-      const fromName = modeInfo.mode === "16" ? fromRow?.city_16_name ?? fromRow?.city_80_name ?? null : fromRow?.city_80_name ?? fromRow?.city_16_name ?? null;
-      const toName = modeInfo.mode === "16" ? toRow?.city_16_name ?? toRow?.city_80_name ?? null : toRow?.city_80_name ?? toRow?.city_16_name ?? null;
+      const [fromNames, toNames] = await Promise.all([
+        resolveCityName(fromCcid, modeInfo.mode),
+        resolveCityName(toCcid, modeInfo.mode),
+      ]);
+      const fromName = fromNames.displayName;
+      const toName = toNames.displayName;
       return { fromCcid, toCcid, fromName, toName, count };
-    })
+      })
+    )
+  )
     .sort((a, b) => b.count - a.count);
 
   const gnickRows = await prisma.ds_player_snapshots.groupBy({
